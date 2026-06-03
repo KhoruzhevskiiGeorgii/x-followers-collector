@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install dependencies
         run: npm install
@@ -27,6 +27,6 @@ jobs:
       - name: Collect followers
         env:
           X_USERNAME: sphere_homotopy
-          WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
+          WEBAPP_URL: https://script.google.com/macros/s/AKfycbwFSXhIklzjbHqxVe93t67lTuNS3WG0dnVlFijSBB8PL3gxv2O4RPToUx2cYXtOoDMPxg/exec
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
         run: npm run collect
