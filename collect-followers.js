@@ -30,23 +30,29 @@ function parseCompactNumber(text) {
   return Math.round(value * multiplier);
 }
 
-async function extractFollowers(page) {
-  const selectors = [
-    `a[href="/${username}/verified_followers"]`,
-    `a[href="/${username}/followers"]`,
-    `a[href$="/followers"]`
-  ];
-
+async function extractMetricFromSelectors(page, selectors) {
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
     if (await locator.count()) {
       const text = await locator.innerText({ timeout: 5000 }).catch(() => '');
       const parsed = parseCompactNumber(text);
       if (parsed !== null) {
-        return { followersTotal: parsed, rawText: text };
+        return { total: parsed, rawText: text, selector };
       }
     }
   }
+
+  return null;
+}
+
+async function extractFollowers(page) {
+  const result = await extractMetricFromSelectors(page, [
+    `a[href="/${username}/followers"]`,
+    `a[href$="/${username}/followers"]`,
+    `a[href$="/followers"]`
+  ]);
+
+  if (result) return result;
 
   const bodyText = await page.locator('body').innerText({ timeout: 10000 });
   const patterns = [
@@ -60,7 +66,7 @@ async function extractFollowers(page) {
     if (match) {
       const parsed = parseCompactNumber(match[1]);
       if (parsed !== null) {
-        return { followersTotal: parsed, rawText: match[0] };
+        return { total: parsed, rawText: match[0], selector: 'body_text_pattern' };
       }
     }
   }
@@ -68,30 +74,22 @@ async function extractFollowers(page) {
   throw new Error('Could not extract followers count from X profile page');
 }
 
-async function main() {
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    locale: 'en-US',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-  });
+async function extractVerifiedFollowers(page) {
+  return extractMetricFromSelectors(page, [
+    `a[href="/${username}/verified_followers"]`,
+    `a[href$="/${username}/verified_followers"]`,
+    `a[href$="/verified_followers"]`
+  ]);
+}
 
-  const page = await context.newPage();
-  const profileUrl = `https://x.com/${username}`;
-
-  await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(6000);
-
-  const { followersTotal, rawText } = await extractFollowers(page);
-  await browser.close();
-
-  const today = new Date().toISOString().slice(0, 10);
+async function sendSnapshot({ date, snapshotUsername, followersTotal, source, rawText }) {
   const payload = {
     token,
-    date: today,
-    username,
+    date,
+    username: snapshotUsername,
     followers_total: followersTotal,
-    source: 'x_public_page_playwright_github_actions',
-    raw_text: rawText
+    source,
+    raw_text: rawText || ''
   };
 
   const response = await fetch(webappUrl, {
@@ -117,8 +115,51 @@ async function main() {
   if (!data.ok) {
     throw new Error(`Web app returned error: ${responseText}`);
   }
+}
 
-  console.log(`Collected @${username}: ${followersTotal} followers`);
+async function main() {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    locale: 'en-US',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  });
+
+  const page = await context.newPage();
+  const profileUrl = `https://x.com/${username}`;
+
+  await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(6000);
+
+  const followers = await extractFollowers(page);
+  const verifiedFollowers = await extractVerifiedFollowers(page);
+
+  await browser.close();
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  await sendSnapshot({
+    date: today,
+    snapshotUsername: username,
+    followersTotal: followers.total,
+    source: 'x_public_page_total_followers_playwright_github_actions',
+    rawText: followers.rawText
+  });
+
+  console.log(`Collected @${username}: ${followers.total} total followers`);
+
+  if (verifiedFollowers) {
+    await sendSnapshot({
+      date: today,
+      snapshotUsername: `${username}_verified`,
+      followersTotal: verifiedFollowers.total,
+      source: 'x_public_page_verified_followers_playwright_github_actions',
+      rawText: verifiedFollowers.rawText
+    });
+
+    console.log(`Collected @${username}: ${verifiedFollowers.total} verified followers`);
+  } else {
+    console.log(`Verified followers count was not visible for @${username}; skipped verified snapshot.`);
+  }
 }
 
 main().catch((err) => {
