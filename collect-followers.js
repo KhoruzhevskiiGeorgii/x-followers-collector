@@ -34,8 +34,8 @@ function parseCompactNumber(text) {
 
 async function addXAuthCookies(context) {
   if (!xAuthToken || !xCt0) {
-    console.log('X login cookies are not set; running as a logged-out public visitor.');
-    return;
+    console.log('X login cookies are not set; running verified collection as a logged-out public visitor.');
+    return false;
   }
 
   const domains = ['.x.com', 'x.com', '.twitter.com', 'twitter.com'];
@@ -62,6 +62,7 @@ async function addXAuthCookies(context) {
 
   await context.addCookies(cookies);
   console.log('X login cookies were loaded from GitHub Secrets.');
+  return true;
 }
 
 function normalizeHandleFromHref(href) {
@@ -143,6 +144,27 @@ async function extractFollowers(page) {
   if (bodyResult) return bodyResult;
 
   throw new Error('Could not extract followers count from X profile page');
+}
+
+async function collectTotalFollowersLoggedOut(browser) {
+  const context = await browser.newContext({
+    locale: 'en-US',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  });
+
+  const page = await context.newPage();
+  const profileUrl = `https://x.com/${username}`;
+
+  try {
+    await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(6000);
+
+    const followers = await extractFollowers(page);
+    console.log(`Collected logged-out total followers: ${followers.total}; raw=${followers.rawText}`);
+    return followers;
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
 async function collectUserHandlesFromPage(page) {
@@ -234,6 +256,20 @@ async function countVerifiedFollowersFromList(context) {
   }
 }
 
+async function collectVerifiedFollowersLoggedIn(browser) {
+  const context = await browser.newContext({
+    locale: 'en-US',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  });
+
+  try {
+    await addXAuthCookies(context);
+    return await countVerifiedFollowersFromList(context);
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
 async function sendSnapshot({ date, snapshotUsername, followersTotal, source, rawText }) {
   const payload = {
     token,
@@ -271,24 +307,10 @@ async function sendSnapshot({ date, snapshotUsername, followersTotal, source, ra
 
 async function main() {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    locale: 'en-US',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-  });
-
-  await addXAuthCookies(context);
 
   try {
-    const page = await context.newPage();
-    const profileUrl = `https://x.com/${username}`;
-
-    await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForTimeout(6000);
-
-    const followers = await extractFollowers(page);
-    await page.close().catch(() => {});
-
-    const verifiedFollowers = await countVerifiedFollowersFromList(context);
+    const followers = await collectTotalFollowersLoggedOut(browser);
+    const verifiedFollowers = await collectVerifiedFollowersLoggedIn(browser);
 
     const today = new Date().toISOString().slice(0, 10);
 
@@ -296,7 +318,7 @@ async function main() {
       date: today,
       snapshotUsername: username,
       followersTotal: followers.total,
-      source: 'x_public_page_total_followers_playwright_github_actions',
+      source: 'x_public_page_total_followers_logged_out_playwright_github_actions',
       rawText: followers.rawText
     });
 
@@ -312,7 +334,7 @@ async function main() {
         date: today,
         snapshotUsername: `${username}_verified`,
         followersTotal: verifiedFollowers.total,
-        source: `x_public_page_verified_followers_${verifiedFollowers.selector}`,
+        source: `x_logged_in_verified_followers_${verifiedFollowers.selector}`,
         rawText: verifiedFollowers.rawText
       });
 
