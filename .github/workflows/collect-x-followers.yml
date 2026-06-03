@@ -3,28 +3,58 @@ name: collect-x-followers
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 20 * * *'
+    # GitHub cron is UTC. Belgrade is UTC+2 in summer and UTC+1 in winter.
+    # We schedule both possible UTC times and gate the job by Europe/Belgrade local hour.
+    - cron: '0 22 * * *'
+    - cron: '0 23 * * *'
 
 jobs:
   collect:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check Belgrade midnight
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run: executing collector."
+            exit 0
+          fi
+
+          BELGRADE_TIME="$(TZ=Europe/Belgrade date '+%Y-%m-%d %H:%M:%S %Z')"
+          BELGRADE_HOUR="$(TZ=Europe/Belgrade date '+%H')"
+          echo "Belgrade time: ${BELGRADE_TIME}"
+
+          if [ "$BELGRADE_HOUR" = "00" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled run is inside the midnight hour in Belgrade."
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping: not midnight in Belgrade."
+          fi
+
       - name: Checkout repository
+        if: steps.gate.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.gate.outputs.should_run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
       - name: Install dependencies
+        if: steps.gate.outputs.should_run == 'true'
         run: npm install
 
       - name: Install Playwright browser
+        if: steps.gate.outputs.should_run == 'true'
         run: npx playwright install chromium --with-deps
 
       - name: Collect followers
+        if: steps.gate.outputs.should_run == 'true'
         env:
           X_USERNAME: sphere_homotopy
           WEBAPP_URL: https://script.google.com/macros/s/AKfycbwFSXhIklzjbHqxVe93t67lTuNS3WG0dnVlFijSBB8PL3gxv2O4RPToUx2cYXtOoDMPxg/exec
