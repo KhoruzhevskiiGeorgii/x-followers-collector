@@ -3,6 +3,8 @@ import { chromium } from 'playwright';
 const username = (process.env.X_USERNAME || 'sphere_homotopy').replace(/^@/, '').trim();
 const webappUrl = process.env.WEBAPP_URL;
 const token = process.env.INGEST_TOKEN;
+const xAuthToken = process.env.X_AUTH_TOKEN;
+const xCt0 = process.env.X_CT0;
 
 if (!webappUrl) {
   throw new Error('WEBAPP_URL env var is required');
@@ -28,6 +30,38 @@ function parseCompactNumber(text) {
   const multiplier = suffix === 'K' ? 1_000 : suffix === 'M' ? 1_000_000 : suffix === 'B' ? 1_000_000_000 : 1;
 
   return Math.round(value * multiplier);
+}
+
+async function addXAuthCookies(context) {
+  if (!xAuthToken || !xCt0) {
+    console.log('X login cookies are not set; running as a logged-out public visitor.');
+    return;
+  }
+
+  const domains = ['.x.com', 'x.com', '.twitter.com', 'twitter.com'];
+  const cookies = domains.flatMap((domain) => [
+    {
+      name: 'auth_token',
+      value: xAuthToken,
+      domain,
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax'
+    },
+    {
+      name: 'ct0',
+      value: xCt0,
+      domain,
+      path: '/',
+      httpOnly: false,
+      secure: true,
+      sameSite: 'Lax'
+    }
+  ]);
+
+  await context.addCookies(cookies);
+  console.log('X login cookies were loaded from GitHub Secrets.');
 }
 
 function normalizeHandleFromHref(href) {
@@ -241,6 +275,8 @@ async function main() {
     locale: 'en-US',
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   });
+
+  await addXAuthCookies(context);
 
   try {
     const page = await context.newPage();
