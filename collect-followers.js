@@ -95,6 +95,13 @@ function normalizeHandleFromHref(href) {
   }
 }
 
+function compactText(text, maxLength = 180) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
 async function extractMetricFromSelectors(page, selectors) {
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
@@ -167,34 +174,46 @@ async function collectTotalFollowersLoggedOut(browser) {
   }
 }
 
-async function collectUserHandlesFromPage(page) {
+async function collectUserCellsFromPage(page) {
   const selectorCandidates = [
-    '[data-testid="primaryColumn"] [data-testid="UserCell"] a[href^="/"]',
-    'main [data-testid="UserCell"] a[href^="/"]'
+    '[data-testid="primaryColumn"] [data-testid="UserCell"]',
+    'main [data-testid="UserCell"]'
   ];
 
   for (const selector of selectorCandidates) {
-    const hrefs = await page
+    const rawCells = await page
       .locator(selector)
-      .evaluateAll((links) => links.map((link) => link.getAttribute('href')).filter(Boolean))
+      .evaluateAll((cells) => cells.map((cell, index) => ({
+        index,
+        text: cell.innerText || '',
+        hrefs: Array.from(cell.querySelectorAll('a[href^="/"]'))
+          .map((link) => link.getAttribute('href'))
+          .filter(Boolean)
+      })))
       .catch(() => []);
 
-    const handles = new Set();
+    const cells = [];
 
-    for (const href of hrefs) {
-      const handle = normalizeHandleFromHref(href);
+    for (const cell of rawCells) {
+      const handle = cell.hrefs.map(normalizeHandleFromHref).find(Boolean);
+
       if (handle && handle !== username.toLowerCase()) {
-        handles.add(handle);
+        cells.push({
+          handle,
+          text: compactText(cell.text),
+          domIndex: cell.index,
+          selector
+        });
       }
     }
 
-    if (handles.size > 0) {
-      console.log(`Verified follower selector used: ${selector}`);
-      return handles;
+    if (cells.length > 0) {
+      console.log(`Verified follower cell selector used: ${selector}`);
+      return cells;
     }
   }
 
-  return new Set();
+  return [];
 }
 
 async function countVerifiedFollowersFromList(context) {
@@ -227,14 +246,20 @@ async function countVerifiedFollowersFromList(context) {
       };
     }
 
-    const seen = new Set();
+    const seen = new Map();
     let stableScrolls = 0;
     let previousSize = 0;
 
     for (let i = 0; i < 80; i++) {
-      const handles = await collectUserHandlesFromPage(page);
-      for (const handle of handles) {
-        seen.add(handle);
+      const cells = await collectUserCellsFromPage(page);
+
+      for (const cell of cells) {
+        if (!seen.has(cell.handle)) {
+          seen.set(cell.handle, {
+            ...cell,
+            firstSeenScroll: i + 1
+          });
+        }
       }
 
       if (seen.size === previousSize) {
@@ -253,12 +278,27 @@ async function countVerifiedFollowersFromList(context) {
     }
 
     if (seen.size > 0) {
-      const sortedHandles = Array.from(seen).sort();
-      console.log(`Verified follower handles (${sortedHandles.length}): ${sortedHandles.join(',')}`);
+      const orderedEntries = Array.from(seen.entries()).map(([handle, cell], index) => ({
+        index: index + 1,
+        handle,
+        text: cell.text,
+        firstSeenScroll: cell.firstSeenScroll,
+        domIndex: cell.domIndex
+      }));
+
+      const orderedHandles = orderedEntries.map((entry) => `${entry.index}:${entry.handle}`).join(',');
+      const cellDetails = orderedEntries
+        .map((entry) => `${entry.index}:${entry.handle}|scroll=${entry.firstSeenScroll}|dom=${entry.domIndex}|text=${entry.text}`)
+        .join(' || ');
+      const sortedHandles = orderedEntries.map((entry) => entry.handle).sort();
+
+      console.log(`Verified follower handles ordered (${orderedEntries.length}): ${orderedHandles}`);
+      console.log(`Verified follower cell details (${orderedEntries.length}): ${cellDetails}`);
+      console.log(`Verified follower handles sorted (${sortedHandles.length}): ${sortedHandles.join(',')}`);
 
       return {
         total: seen.size,
-        rawText: `counted_visible_verified_followers=${seen.size}; handles=${sortedHandles.join(',')}; url=${verifiedUrl}; method=primary_column_unique_user_cells`,
+        rawText: `counted_visible_verified_followers=${seen.size}; ordered_handles=${orderedHandles}; url=${verifiedUrl}; method=primary_column_unique_user_cells`,
         selector: 'verified_followers_primary_column_count'
       };
     }
