@@ -168,21 +168,33 @@ async function collectTotalFollowersLoggedOut(browser) {
 }
 
 async function collectUserHandlesFromPage(page) {
-  const hrefs = await page
-    .locator('[data-testid="UserCell"] a[href^="/"]')
-    .evaluateAll((links) => links.map((link) => link.getAttribute('href')).filter(Boolean))
-    .catch(() => []);
+  const selectorCandidates = [
+    '[data-testid="primaryColumn"] [data-testid="UserCell"] a[href^="/"]',
+    'main [data-testid="UserCell"] a[href^="/"]'
+  ];
 
-  const handles = new Set();
+  for (const selector of selectorCandidates) {
+    const hrefs = await page
+      .locator(selector)
+      .evaluateAll((links) => links.map((link) => link.getAttribute('href')).filter(Boolean))
+      .catch(() => []);
 
-  for (const href of hrefs) {
-    const handle = normalizeHandleFromHref(href);
-    if (handle && handle !== username.toLowerCase()) {
-      handles.add(handle);
+    const handles = new Set();
+
+    for (const href of hrefs) {
+      const handle = normalizeHandleFromHref(href);
+      if (handle && handle !== username.toLowerCase()) {
+        handles.add(handle);
+      }
+    }
+
+    if (handles.size > 0) {
+      console.log(`Verified follower selector used: ${selector}`);
+      return handles;
     }
   }
 
-  return handles;
+  return new Set();
 }
 
 async function countVerifiedFollowersFromList(context) {
@@ -241,10 +253,13 @@ async function countVerifiedFollowersFromList(context) {
     }
 
     if (seen.size > 0) {
+      const sortedHandles = Array.from(seen).sort();
+      console.log(`Verified follower handles (${sortedHandles.length}): ${sortedHandles.join(',')}`);
+
       return {
         total: seen.size,
-        rawText: `counted_visible_verified_followers=${seen.size}; url=${verifiedUrl}; method=unique_user_cells`,
-        selector: 'verified_followers_list_count'
+        rawText: `counted_visible_verified_followers=${seen.size}; handles=${sortedHandles.join(',')}; url=${verifiedUrl}; method=primary_column_unique_user_cells`,
+        selector: 'verified_followers_primary_column_count'
       };
     }
 
