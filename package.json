@@ -1,0 +1,12 @@
+{
+  "name": "x-followers-collector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "collect": "node collect-followers.js"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}
