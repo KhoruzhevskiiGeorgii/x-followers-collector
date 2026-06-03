@@ -59,4 +59,6 @@ jobs:
           X_USERNAME: sphere_homotopy
           WEBAPP_URL: https://script.google.com/macros/s/AKfycbwFSXhIklzjbHqxVe93t67lTuNS3WG0dnVlFijSBB8PL3gxv2O4RPToUx2cYXtOoDMPxg/exec
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
+          X_CT0: ${{ secrets.X_CT0 }}
         run: npm run collect
