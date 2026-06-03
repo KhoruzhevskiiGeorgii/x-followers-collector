@@ -1,0 +1,32 @@
+name: collect-x-followers
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 20 * * *'
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium --with-deps
+
+      - name: Collect followers
+        env:
+          X_USERNAME: sphere_homotopy
+          WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: npm run collect
