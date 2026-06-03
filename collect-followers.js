@@ -111,14 +111,6 @@ async function extractFollowers(page) {
   throw new Error('Could not extract followers count from X profile page');
 }
 
-async function extractVerifiedFollowersFromProfile(page) {
-  return extractMetricFromSelectors(page, [
-    `a[href="/${username}/verified_followers"]`,
-    `a[href$="/${username}/verified_followers"]`,
-    `a[href$="/verified_followers"]`
-  ]);
-}
-
 async function collectUserHandlesFromPage(page) {
   const hrefs = await page
     .locator('[data-testid="UserCell"] a[href^="/"]')
@@ -144,6 +136,15 @@ async function countVerifiedFollowersFromList(context) {
   try {
     await page.goto(verifiedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(8000);
+
+    const currentUrl = page.url();
+    console.log(`Verified followers page URL after load: ${currentUrl}`);
+
+    if (!currentUrl.includes('/verified_followers')) {
+      const bodyText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '');
+      console.log(`Verified followers page redirected away. First body text: ${bodyText.slice(0, 500)}`);
+      return null;
+    }
 
     const bodyResult = await extractMetricFromBodyText(page, [
       /([0-9][0-9,.]*\s*[KMB]?)\s+Verified followers/i,
@@ -249,11 +250,9 @@ async function main() {
     await page.waitForTimeout(6000);
 
     const followers = await extractFollowers(page);
-    const verifiedFollowers =
-      (await extractVerifiedFollowersFromProfile(page)) ||
-      (await countVerifiedFollowersFromList(context));
-
     await page.close().catch(() => {});
+
+    const verifiedFollowers = await countVerifiedFollowersFromList(context);
 
     const today = new Date().toISOString().slice(0, 10);
 
@@ -268,6 +267,11 @@ async function main() {
     console.log(`Collected @${username}: ${followers.total} total followers`);
 
     if (verifiedFollowers) {
+      if (verifiedFollowers.total === followers.total && verifiedFollowers.selector !== 'verified_followers_page_text') {
+        console.log(`Verified followers matched total followers (${verifiedFollowers.total}); treating as suspicious and skipping verified snapshot.`);
+        return;
+      }
+
       await sendSnapshot({
         date: today,
         snapshotUsername: `${username}_verified`,
