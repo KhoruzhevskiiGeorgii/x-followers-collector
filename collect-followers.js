@@ -270,15 +270,21 @@ async function collectVerifiedFollowersLoggedIn(browser) {
   }
 }
 
-async function sendSnapshot({ date, snapshotUsername, followersTotal, source, rawText }) {
+async function sendAccountSnapshot({ date, followers, verifiedFollowers }) {
   const payload = {
     token,
     date,
-    username: snapshotUsername,
-    followers_total: followersTotal,
-    source,
-    raw_text: rawText || ''
+    username,
+    followers_total: followers.total,
+    source: 'x_public_page_total_followers_logged_out_playwright_github_actions',
+    raw_text: followers.rawText || ''
   };
+
+  if (verifiedFollowers) {
+    payload.verified_followers_total = verifiedFollowers.total;
+    payload.verified_source = `x_logged_in_verified_followers_${verifiedFollowers.selector}`;
+    payload.verified_raw_text = verifiedFollowers.rawText || '';
+  }
 
   const response = await fetch(webappUrl, {
     method: 'POST',
@@ -312,35 +318,29 @@ async function main() {
     const followers = await collectTotalFollowersLoggedOut(browser);
     const verifiedFollowers = await collectVerifiedFollowersLoggedIn(browser);
 
+    if (verifiedFollowers && verifiedFollowers.total === followers.total && verifiedFollowers.selector !== 'verified_followers_page_text') {
+      console.log(`Verified followers matched total followers (${verifiedFollowers.total}); treating as suspicious and ignoring verified snapshot.`);
+    }
+
+    const safeVerifiedFollowers =
+      verifiedFollowers && !(verifiedFollowers.total === followers.total && verifiedFollowers.selector !== 'verified_followers_page_text')
+        ? verifiedFollowers
+        : null;
+
     const today = new Date().toISOString().slice(0, 10);
 
-    await sendSnapshot({
+    await sendAccountSnapshot({
       date: today,
-      snapshotUsername: username,
-      followersTotal: followers.total,
-      source: 'x_public_page_total_followers_logged_out_playwright_github_actions',
-      rawText: followers.rawText
+      followers,
+      verifiedFollowers: safeVerifiedFollowers
     });
 
     console.log(`Collected @${username}: ${followers.total} total followers`);
 
-    if (verifiedFollowers) {
-      if (verifiedFollowers.total === followers.total && verifiedFollowers.selector !== 'verified_followers_page_text') {
-        console.log(`Verified followers matched total followers (${verifiedFollowers.total}); treating as suspicious and skipping verified snapshot.`);
-        return;
-      }
-
-      await sendSnapshot({
-        date: today,
-        snapshotUsername: `${username}_verified`,
-        followersTotal: verifiedFollowers.total,
-        source: `x_logged_in_verified_followers_${verifiedFollowers.selector}`,
-        rawText: verifiedFollowers.rawText
-      });
-
-      console.log(`Collected @${username}: ${verifiedFollowers.total} verified followers`);
+    if (safeVerifiedFollowers) {
+      console.log(`Collected @${username}: ${safeVerifiedFollowers.total} verified followers`);
     } else {
-      console.log(`Verified followers count was not visible for @${username}; skipped verified snapshot.`);
+      console.log(`Verified followers count was not visible for @${username}; skipped verified value.`);
     }
   } finally {
     await browser.close().catch(() => {});
